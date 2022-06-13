@@ -1,0 +1,99 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kps-dev-dp-demo      ## Deployment 이름 정의 
+  namespace: kps-dev-nm-demo  ## 할당된 네임스페이스 지정 
+spec:
+  selector:                 ## Deployment가 pod를 관리할 태그를 지정
+    matchLabels: 
+      app: kps-dev-dp-demo
+  replicas: 3            ## Pod 갯수를 정의 
+  strategy: # RolllingUpdate 수행, 기본동작은 Recreate 배포 방식 
+    type: RollingUpdate 
+    rollingUpdate:
+      maxSurge: 0      ## how many pods we can add at a time
+      maxUnavailable: 25%  ## maxUnavailable define how many pods can be unavailable during the rolling update
+  template:
+    metadata:
+      labels:
+        app: kps-dev-dp-demo
+        np: kps-dev-np-demo
+    spec:
+      # Security Context 정의 
+      hostPID: false
+      hostIPC: false
+      hostNetwork: false
+      securityContext:
+        runAsNonRoot: true # user 권한으로만 Container 동작 
+        runAsUser: 1001 # Container의 사용자 ID
+        runAsGroup : 1001  # Container의  그룹 ID
+        fsGroup : 1001  # 볼륨이 파드로 마운트될 때 Kubernetes가 볼륨에 있는 모든 파일의 권한을 변경할 그룹을 정의
+      automountServiceAccountToken: false
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                - key: ng
+                  operator: In
+                  values:
+                  - kps-dev-ng-demo
+      containers:
+      - name: kps-dev-dp-demo   ## Pod 내의 컨테이너 이름 
+        image: nginx:1.0
+      #securityContext 정의
+        securityContext:
+          privileged: false # root로 권한 상승을 방지
+          allowPrivilegeEscalation: false # 상위 컨테이너 보다 더 많은 권한을 가진 프로세스를 가질 수 있는 것을 방지
+          capabilities:
+            # add: ["NET_ADMIN", "SYS_TIME"] #필수 권한만 부여할것
+            drop: ["ALL"]
+        ports:
+        - containerPort: 8080
+          name: tcp-8080-demo #(내부)
+        envFrom: 
+        - configMapRef: #컨피그맵을 통한 환경 변수 지정
+            name: kps-dev-cm-demo
+        - secretRef: #시크릿을 통한 환경 변수 지정
+            name: kps-dev-sec-demo
+        resources:
+          requests:
+            memory: 1Gi
+            cpu: 300m
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/bin/bash", "-c", "sleep 5"] # Pod 종료 전 graceful하게 종료할 명령 기입
+          # postStart: ## 만약 Container가 뜨고나서 서비스 상태를 확인하거나 waiting이 필요할 때 사용, 단 사용하게 되면 배포시간은 길어짐
+          #   exec:  #testing
+          #     command: ["/bin/sh", "-c", "sleep 210"]
+        readinessProbe: #처음 컨테이너 내 어플리케이션의 실행 준비 상태를 이 명령어로 확인하게 됨 
+        ############### 참고: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
+          httpGet:
+            path: /
+            port: 8080
+          # exec: 
+          #   command: ["/bin/grpc_health_probe", "-addr=:9999"]
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        livenessProbe: #반복적으로 컨테이너의 상태를 검증하는 필드 협력사별로 service status check에 사용되는 스크립트 파일 실행 명령 기입.
+        ############### 참고: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        volumeMounts:
+        - name: secrets-store-inline  #AWS Secret manager를 통해 암호화된 환경 변수 획득
+          mountPath: "/mnt/secrets-store"
+          readOnly: true
+      serviceAccountName: kps-dev-sa-demo
+      volumes:
+      - name: secrets-store-inline  #Volume mount 정보
+        csi:
+          driver: secrets-store.csi.k8s.io
+          readOnly: true
+          volumeAttributes:
+            secretProviderClass: "kps-dev-sec-aws-demo" #SecretProviderClass 이름
+...
