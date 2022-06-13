@@ -1,0 +1,94 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kps-dev-svr-lb
+  namespace: kps-dev-nm-demo
+  labels:
+    app: kps-dev-dp-demo
+  annotations:
+    ## Health Check Settings
+    alb.ingress.kubernetes.io/healthcheck-protocol: HTTP 
+    alb.ingress.kubernetes.io/healthcheck-port: traffic-port
+    alb.ingress.kubernetes.io/healthcheck-path: /
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: '10'
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: '5'
+    alb.ingress.kubernetes.io/success-codes: '200-399'
+    alb.ingress.kubernetes.io/healthy-threshold-count: '2'
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: '2'
+    ## Only GRPC options
+    # alb.ingress.kubernetes.io/backend-protocol-version: GRPC
+    # alb.ingress.kubernetes.io/healthcheck-path: "/AWS.ALB/healthcheck"
+    # alb.ingress.kubernetes.io/success-codes: "12-16" #supported values: [0-99]
+    # alb.ingress.kubernetes.io/healthcheck-interval-seconds: "10"
+    # alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "5"
+    # alb.ingress.kubernetes.io/healthy-threshold-count: "2"
+    # alb.ingress.kubernetes.io/unhealthy-threshold-count: "2"
+    # Attributes
+    alb.ingress.kubernetes.io/target-group-attributes: "deregistration_delay.timeout_seconds=10, load_balancing.algorithm.type=least_outstanding_requests"
+spec:
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+  type: ClusterIP
+  selector:
+    app: kps-dev-dp-demo
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kps-dev-ing-80
+  namespace: kps-dev-nm-demo
+  annotations:
+    ## Ingress Core Settings
+    kubernetes.io/ingress.class: "alb"
+    alb.ingress.kubernetes.io/scheme: internal # Do not use internet-facing option
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+    ## Options 
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/group.name: kps-dev-svr-lb  #여러개의 ingress를 하나의 ALB로 통합하는 그룹으로 단일 ALB에서 Multi target group을 지원
+    alb.ingress.kubernetes.io/group.order: "1" #supported values: [1-1000] 낮은 값이 우선순위
+    alb.ingress.kubernetes.io/inbound-cidrs: "0.0.0.0/0" 
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kps-dev-svr-lb #k8s service name을 정의
+            port:
+              number: 8080 #Container port 정의
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kps-dev-ing-443
+  namespace: kps-dev-nm-demo
+  annotations:
+    ## Ingress Core Settings
+    kubernetes.io/ingress.class: "alb"
+    alb.ingress.kubernetes.io/scheme: internal # Do not use internet-facing option
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS": 443}]'
+    ## Options 
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/group.name: kps-dev-svr-lb  #여러개의 ingress를 하나의 ALB로 통합하는 그룹으로 단일 ALB에서 Multi target group을 지원
+    alb.ingress.kubernetes.io/group.order: "2" #supported values: [1-1000] 낮은 값이 우선순위
+    alb.ingress.kubernetes.io/inbound-cidrs: "0.0.0.0/0" # 
+    ## SSL Option
+    alb.ingress.kubernetes.io/ssl-policy: "ELBSecurityPolicy-2016-08"
+    alb.ingress.kubernetes.io/certificate-arn: $CERTIFICATE-ARN  # INPUT CERTIFICATE-ARN
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /  #ALB에서 path 기반 라우팅 할 경우 정의
+        pathType: Prefix
+        backend:
+          service:
+            name: kps-dev-svr-lb #k8s service name을 정의
+            port:
+              number: 8080 #Container port 정의
+...
